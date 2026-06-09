@@ -408,7 +408,7 @@ async def _direct_fallback(
     }
 
     try:
-ctx = {
+        ctx = {
             "progress_cb": progress_cb,
             "workspace": workspace,
             "subproc_env": _subproc_env,
@@ -434,7 +434,7 @@ async def execute_tool_block(
     owner: Optional[str] = None,
     progress_cb: Optional[Callable[[Dict], Awaitable[None]]] = None,
     workspace: Optional[str] = None,
-tool_policy: Optional[Any] = None,
+    tool_policy: Optional[Any] = None,
 ) -> Tuple[str, Dict]:
     """Execute a single tool block. Returns (description, result_dict).
 
@@ -745,7 +745,7 @@ tool_policy: Optional[Any] = None,
         desc = "edit_image"
         result = await do_edit_image(content, owner=owner)
     elif tool == "edit_file":
-result = await _direct_fallback(tool, content, workspace=workspace) or {"error": "edit failed", "exit_code": 1}
+        result = await _direct_fallback(tool, content, workspace=workspace) or {"error": "edit failed", "exit_code": 1}
         desc = result.get("output") or result.get("error") or "edit_file"
     elif tool == "trigger_research":
         desc = "trigger_research"
