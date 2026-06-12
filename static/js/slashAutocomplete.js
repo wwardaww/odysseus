@@ -83,7 +83,8 @@ function _flatten() {
 
 async function _loadSkillEntries() {
   try {
-    const res = await fetch('/api/skills/slash-catalog', { credentials: 'same-origin' });
+    const ws = localStorage.getItem('odysseus-workspace') || '';
+    const res = await fetch(`/api/skills/slash-catalog${ws ? `?workspace=${encodeURIComponent(ws)}` : ''}`, { credentials: 'same-origin' });
     if (!res.ok) return [];
     const data = await res.json();
     return (Array.isArray(data.skills) ? data.skills : []).map(s => ({

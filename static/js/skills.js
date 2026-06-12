@@ -34,7 +34,8 @@ function _playSkillsCascade(container = document.getElementById('skills-list')) 
 const _mdCache = new Map();
 async function _fetchSkillMarkdown(name) {
   if (_mdCache.has(name)) return _mdCache.get(name);
-  const res = await fetch(`${API}/api/skills/${encodeURIComponent(name)}/markdown`);
+  const ws = localStorage.getItem('odysseus-workspace') || '';
+  const res = await fetch(`${API}/api/skills/${encodeURIComponent(name)}/markdown${ws ? `?workspace=${encodeURIComponent(ws)}` : ''}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
   const md = data.markdown || '';
@@ -89,7 +90,8 @@ export async function loadSkills(cascade = false) {
   if (_loadPromise) return _loadPromise;
   _loadPromise = (async () => {
   try {
-    const res = await fetch(`${API}/api/skills`);
+    const ws = localStorage.getItem('odysseus-workspace') || '';
+    const res = await fetch(`${API}/api/skills${ws ? `?workspace=${encodeURIComponent(ws)}` : ''}`);
     const data = await res.json();
     skills = data.skills || [];
     _loadSkillApprovalThreshold();
@@ -1822,7 +1824,8 @@ async function _bulkAudit() {
 async function _showSkillSource(name) {
   let md = '';
   try {
-    const res = await fetch(`${API}/api/skills/${encodeURIComponent(name)}/markdown`);
+    const ws = localStorage.getItem('odysseus-workspace') || '';
+    const res = await fetch(`${API}/api/skills/${encodeURIComponent(name)}/markdown${ws ? `?workspace=${encodeURIComponent(ws)}` : ''}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     md = data.markdown || '';

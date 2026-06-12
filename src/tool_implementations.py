@@ -107,6 +107,7 @@ async def do_manage_skills(
     content: str,
     owner: Optional[str] = None,
     attached_skill_name: Optional[str] = None,
+    workspace: Optional[str] = None,
 ) -> Dict:
     """Handle manage_skills tool calls.
 
@@ -145,7 +146,7 @@ async def do_manage_skills(
     name = (args.get("name") or args.get("skill_id") or "").strip()
 
     if action in ("list", "index", ""):
-        all_skills = sm.load(owner=owner)
+        all_skills = sm.load(owner=owner, workspace=workspace)
         if attached_skill_name:
             all_skills = [s for s in all_skills if s.get("name") == attached_skill_name]
         if not all_skills:
@@ -168,7 +169,7 @@ async def do_manage_skills(
             return {"error": "name is required for view", "exit_code": 1}
         if attached_skill_name and name != attached_skill_name:
             return {"error": f"Skill {name!r} not found", "exit_code": 1}
-        md = sm.read_skill_md(name, owner=owner)
+        md = sm.read_skill_md(name, owner=owner, workspace=workspace)
         if md is None:
             return {"error": f"Skill {name!r} not found", "exit_code": 1}
         return {"results": md}
@@ -181,7 +182,7 @@ async def do_manage_skills(
         ref = (args.get("path") or "").strip()
         if not ref:
             return {"error": "path is required for view_ref", "exit_code": 1}
-        text = sm.read_skill_reference(name, ref, owner=owner)
+        text = sm.read_skill_reference(name, ref, owner=owner, workspace=workspace)
         if text is None:
             return {"error": f"Reference {ref!r} not found under {name!r}", "exit_code": 1}
         return {"results": text}
@@ -265,10 +266,12 @@ async def do_manage_skills(
         except Exception as e:
             return {"error": f"Could not parse content as SKILL.md: {e}", "exit_code": 1}
         sk_new.name = slugify(sk_new.name or name)
-        existing = sm.load(owner=owner)
+        existing = sm.load(owner=owner, workspace=workspace)
         match = next((s for s in existing if s.get("name") == name), None)
         if not match:
             return {"error": f"Skill {name!r} not found", "exit_code": 1}
+        if match.get("read_only") is True:
+            return {"error": f"Skill {name!r} is read-only (external/workspace skill) and cannot be edited.", "exit_code": 1}
         if not sk_new.owner:
             sk_new.owner = match.get("owner") or owner
         ok = sm.update_skill(name, _skill_dump(sk_new), owner=owner)
@@ -283,7 +286,13 @@ async def do_manage_skills(
         new_str = args.get("new_string", "")
         if not isinstance(old, str) or not old:
             return {"error": "old_string is required and must be non-empty", "exit_code": 1}
-        md = sm.read_skill_md(name, owner=owner)
+        existing = sm.load(owner=owner, workspace=workspace)
+        match = next((s for s in existing if s.get("name") == name), None)
+        if not match:
+            return {"error": f"Skill {name!r} not found", "exit_code": 1}
+        if match.get("read_only") is True:
+            return {"error": f"Skill {name!r} is read-only (external/workspace skill) and cannot be patched.", "exit_code": 1}
+        md = sm.read_skill_md(name, owner=owner, workspace=workspace)
         if md is None:
             return {"error": f"Skill {name!r} not found", "exit_code": 1}
         count = md.count(old)
@@ -305,10 +314,12 @@ async def do_manage_skills(
             return {"error": "name is required for publish", "exit_code": 1}
         if attached_skill_name and name != attached_skill_name:
             return {"error": f"Skill {name!r} not found", "exit_code": 1}
-        all_skills = sm.load(owner=owner)
+        all_skills = sm.load(owner=owner, workspace=workspace)
         match = next((s for s in all_skills if s.get("name") == name), None)
         if not match:
             return {"error": f"Skill {name!r} not found", "exit_code": 1}
+        if match.get("read_only") is True:
+            return {"error": f"Skill {name!r} is read-only (external/workspace skill) and cannot be published.", "exit_code": 1}
         updates = {"status": "published"}
         if args.get("confidence") is not None:
             updates["confidence"] = max(0.0, min(1.0, float(args["confidence"])))
@@ -320,6 +331,12 @@ async def do_manage_skills(
             return {"error": "name is required for delete", "exit_code": 1}
         if attached_skill_name and name != attached_skill_name:
             return {"error": f"Skill {name!r} not found", "exit_code": 1}
+        existing = sm.load(owner=owner, workspace=workspace)
+        match = next((s for s in existing if s.get("name") == name), None)
+        if not match:
+            return {"error": f"Skill {name!r} not found", "exit_code": 1}
+        if match.get("read_only") is True:
+            return {"error": f"Skill {name!r} is read-only (external/workspace skill) and cannot be deleted.", "exit_code": 1}
         ok = sm.delete_skill(name, owner=owner)
         return {"results": f"Deleted skill `{name}`."} if ok else {"error": f"Skill {name!r} not found", "exit_code": 1}
 
@@ -327,7 +344,7 @@ async def do_manage_skills(
         query = (args.get("query") or "").strip()
         if not query:
             return {"error": "query is required for search", "exit_code": 1}
-        candidates = sm.load(owner=owner)
+        candidates = sm.load(owner=owner, workspace=workspace)
         if attached_skill_name:
             candidates = [s for s in candidates if s.get("name") == attached_skill_name]
         results = sm.get_relevant_skills(query, candidates, max_items=5)

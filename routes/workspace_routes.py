@@ -21,7 +21,10 @@ def setup_workspace_routes():
         """
         owner = get_current_user(request)
         if not owner_is_admin_or_single_user(owner):
-            raise HTTPException(status_code=403, detail="Workspace browsing is admin-only")
+            auth_mgr = getattr(request.app.state, "auth_manager", None)
+            privs = auth_mgr.get_privileges(owner) if auth_mgr and owner else {}
+            if not privs.get("can_use_bash", False):
+                raise HTTPException(status_code=403, detail="Workspace browsing is admin-only")
 
         # Resolve symlinks so the reported path is canonical and the UI navigates
         # real directories (defends against symlink games in displayed paths).

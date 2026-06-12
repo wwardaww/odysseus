@@ -1097,22 +1097,22 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
             logger.debug("skill_added event dispatch failed", exc_info=True)
 
     @router.get("")
-    async def list_skills(request: Request):
+    async def list_skills(request: Request, workspace: Optional[str] = None):
         user = _owner(request)
-        skills = skills_manager.load(owner=user)
+        skills = skills_manager.load(owner=user, workspace=workspace)
         return {"skills": skills, "count": len(skills)}
 
     @router.get("/index")
-    async def get_index(request: Request):
+    async def get_index(request: Request, workspace: Optional[str] = None):
         """The lightweight `[{name, description, category}]` list that the
         agent's system prompt sees. Useful for the UI's "what does the model
         actually have access to?" view."""
         user = _owner(request)
-        idx = skills_manager.index_for(owner=user)
+        idx = skills_manager.index_for(owner=user, workspace=workspace)
         return {"index": idx, "count": len(idx)}
 
     @router.get("/slash-catalog")
-    async def get_slash_catalog(request: Request):
+    async def get_slash_catalog(request: Request, workspace: Optional[str] = None):
         """Return skills that are available as slash commands.
 
         Mirrors the agent prompt's published-skill index so the UI never offers
@@ -1120,7 +1120,7 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         """
         user = _owner(request)
         entries = []
-        for s in skills_manager.load(owner=user):
+        for s in skills_manager.load(owner=user, workspace=workspace):
             name = (s.get("name") or "").strip()
             if not name:
                 continue
@@ -1375,7 +1375,7 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         return {"ok": True, "deduped": bool(entry.get("_deduped")), "skill": entry}
 
     @router.post("/{skill_id}/invoke")
-    async def invoke_skill(request: Request, skill_id: str):
+    async def invoke_skill(request: Request, skill_id: str, workspace: Optional[str] = None):
         """Build a skill-pinned prompt for slash-command invocation.
 
         This is intentionally server-side so availability, ownership, and usage
@@ -1389,7 +1389,7 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         request_text = (body.get("request") or "").strip() if isinstance(body, dict) else ""
 
         invokable = {
-            s.get("name"): s for s in skills_manager.load(owner=user)
+            s.get("name"): s for s in skills_manager.load(owner=user, workspace=workspace)
             if (s.get("name") or "").strip()
         }
         match = invokable.get(skill_id)
@@ -1397,7 +1397,7 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
             raise HTTPException(404, "Skill is not available for slash invocation")
 
         name = match.get("name")
-        md = skills_manager.read_skill_md(name, owner=user)
+        md = skills_manager.read_skill_md(name, owner=user, workspace=workspace)
         if md is None:
             raise HTTPException(404, "Skill source unavailable")
 
@@ -1416,31 +1416,31 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         }
 
     @router.get("/{skill_id}")
-    async def get_skill(request: Request, skill_id: str):
+    async def get_skill(request: Request, skill_id: str, workspace: Optional[str] = None):
         user = _owner(request)
-        skills = skills_manager.load(owner=user)
+        skills = skills_manager.load(owner=user, workspace=workspace)
         for sk in skills:
             if sk.get("name") == skill_id or sk.get("id") == skill_id:
                 return sk
         raise HTTPException(404, "Skill not found")
 
     @router.get("/{skill_id}/markdown")
-    async def get_skill_markdown(request: Request, skill_id: str):
+    async def get_skill_markdown(request: Request, skill_id: str, workspace: Optional[str] = None):
         """Return the raw SKILL.md text — used by the slash-invocation flow
         and the editor's 'view source' affordance."""
         user = _owner(request)
-        skills = skills_manager.load(owner=user)
+        skills = skills_manager.load(owner=user, workspace=workspace)
         match = next((s for s in skills if s.get("name") == skill_id or s.get("id") == skill_id), None)
         if not match:
             raise HTTPException(404, "Skill not found")
         _verify_owner(match, user)
-        md = skills_manager.read_skill_md(match.get("name"), owner=user)
+        md = skills_manager.read_skill_md(match.get("name"), owner=user, workspace=workspace)
         if md is None:
             raise HTTPException(404, "Skill source unavailable (legacy entry?)")
         return {"name": match.get("name"), "markdown": md}
 
     @router.post("/{skill_id}/test")
-    async def test_skill(request: Request, skill_id: str):
+    async def test_skill(request: Request, skill_id: str, workspace: Optional[str] = None):
         """Kick off a background skill test (agent run + LLM judge). Returns
         immediately; the run executes server-side so it survives the modal being
         closed. Poll GET /{skill_id}/test-status for progress + verdict.
@@ -1455,13 +1455,13 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         body = await request.json()
         task = (body.get("task") or "").strip()
 
-        skills = skills_manager.load(owner=user)
+        skills = skills_manager.load(owner=user, workspace=workspace)
         match = next((s for s in skills if s.get("name") == skill_id or s.get("id") == skill_id), None)
         if not match:
             raise HTTPException(404, "Skill not found")
         _verify_owner(match, user)
         name = match.get("name")
-        md = skills_manager.read_skill_md(name, owner=user) or ""
+        md = skills_manager.read_skill_md(name, owner=user, workspace=workspace) or ""
 
         if not task:
             task = _skill_test_task(match)
@@ -1503,10 +1503,10 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         return {"ok": True, "status": "running", "skill": name, "model": model}
 
     @router.get("/{skill_id}/test-status")
-    async def test_skill_status(request: Request, skill_id: str):
+    async def test_skill_status(request: Request, skill_id: str, workspace: Optional[str] = None):
         """Current background-test state for a skill (status / log / verdict)."""
         user = _owner(request)
-        skills = skills_manager.load(owner=user)
+        skills = skills_manager.load(owner=user, workspace=workspace)
         match = next((s for s in skills if s.get("name") == skill_id or s.get("id") == skill_id), None)
         name = (match or {}).get("name", skill_id)
         job = _skill_test_jobs.get((user or "", name))
@@ -1552,7 +1552,7 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         except ValueError as e:
             raise HTTPException(400, str(e))
 
-        skills = skills_manager.load(owner=user)
+        skills = skills_manager.load(owner=user, workspace=workspace)
         by_name = {s.get("name"): s for s in skills if s.get("name")}
         if isinstance(requested_names, list):
             names = []
@@ -1623,7 +1623,7 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         return {"ok": True, "status": "cancelled" if job else "none"}
 
     @router.post("/{skill_id}/markdown")
-    async def save_skill_markdown(request: Request, skill_id: str):
+    async def save_skill_markdown(request: Request, skill_id: str, workspace: Optional[str] = None):
         """Replace SKILL.md with new raw content. Parses + validates first."""
         from services.memory.skill_format import Skill
         user = _owner(request)
@@ -1631,7 +1631,7 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         new_content = body.get("markdown")
         if not isinstance(new_content, str) or not new_content.strip():
             raise HTTPException(400, "markdown is required")
-        skills = skills_manager.load(owner=user)
+        skills = skills_manager.load(owner=user, workspace=workspace)
         match = next((s for s in skills if s.get("name") == skill_id or s.get("id") == skill_id), None)
         if not match:
             raise HTTPException(404, "Skill not found")
@@ -1678,9 +1678,9 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         return {"ok": True, "name": sk.name}
 
     @router.put("/{skill_id}")
-    async def update_skill(request: Request, skill_id: str, body: SkillUpdateRequest):
+    async def update_skill(request: Request, skill_id: str, body: SkillUpdateRequest, workspace: Optional[str] = None):
         user = _owner(request)
-        skills = skills_manager.load(owner=user)
+        skills = skills_manager.load(owner=user, workspace=workspace)
         match = next((s for s in skills if s.get("name") == skill_id or s.get("id") == skill_id), None)
         if not match:
             raise HTTPException(404, "Skill not found")
@@ -1699,9 +1699,9 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         return {"ok": True}
 
     @router.delete("/{skill_id}")
-    async def delete_skill(request: Request, skill_id: str):
+    async def delete_skill(request: Request, skill_id: str, workspace: Optional[str] = None):
         user = _owner(request)
-        skills = skills_manager.load(owner=user)
+        skills = skills_manager.load(owner=user, workspace=workspace)
         match = next((s for s in skills if s.get("name") == skill_id or s.get("id") == skill_id), None)
         if not match:
             raise HTTPException(404, "Skill not found")
@@ -1714,13 +1714,13 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         return {"ok": True}
 
     @router.post("/search")
-    async def search_skills(request: Request):
+    async def search_skills(request: Request, workspace: Optional[str] = None):
         body = await request.json()
         query = body.get("query", "")
         if not query.strip():
             raise HTTPException(400, "query is required")
         user = _owner(request)
-        skills = skills_manager.load(owner=user)
+        skills = skills_manager.load(owner=user, workspace=workspace)
         results = skills_manager.get_relevant_skills(query, skills, max_items=10)
         return {"skills": results, "query": query, "count": len(results)}
 

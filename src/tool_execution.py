@@ -645,10 +645,17 @@ async def execute_tool_block(
     # Route MCP-extracted tools through the MCP manager. Forward
     # the progress callback so long-running subprocess tools
     # (bash, python) can stream `tool_progress` events to the UI.
-    if tool in _MCP_TOOL_MAP:
+    # If a workspace is active, core tools (read_file, write_file, bash, python)
+    # MUST run natively via direct fallback to ensure proper workspace confinement.
+    if tool in _MCP_TOOL_MAP and not (workspace and tool in ("read_file", "write_file", "bash", "python")):
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
         result = await _call_mcp_tool(tool, content, progress_cb=progress_cb, workspace=workspace)
+    elif tool in _MCP_TOOL_MAP:
+        first_line = content.split(chr(10))[0][:80]
+        desc = f"{tool}: {first_line}"
+        result = await _direct_fallback(tool, content, progress_cb=progress_cb, workspace=workspace) \
+            or {"error": f"{tool}: native fallback execution failed", "exit_code": 1}
     elif tool in ("grep", "glob", "ls"):
         # Code-navigation tools — no MCP server; run the direct implementation.
         # Confined to the workspace when one is set (same policy as read_file).
@@ -678,7 +685,7 @@ async def execute_tool_block(
         result = await do_manage_tasks(content, owner=owner)
     elif tool == "manage_skills":
         desc = "manage_skills"
-        result = await do_manage_skills(content, owner=owner, attached_skill_name=attached_skill_name)
+        result = await do_manage_skills(content, owner=owner, attached_skill_name=attached_skill_name, workspace=workspace)
     elif tool == "api_call":
         first_line = content.split("\n")[0].strip()[:60]
         desc = f"api_call: {first_line}"

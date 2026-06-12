@@ -324,7 +324,8 @@ async function _loadSkillSlashCatalog(force = false) {
   const now = Date.now();
   if (!force && (now - _skillCatalogCache.at) < 15000) return _skillCatalogCache.items;
   try {
-    const res = await fetch(`${API_BASE}/api/skills/slash-catalog`, { credentials: 'same-origin' });
+    const ws = localStorage.getItem('odysseus-workspace') || '';
+    const res = await fetch(`${API_BASE}/api/skills/slash-catalog${ws ? `?workspace=${encodeURIComponent(ws)}` : ''}`, { credentials: 'same-origin' });
     if (!res.ok) throw new Error('catalog unavailable');
     const data = await res.json();
     const items = Array.isArray(data.skills) ? data.skills : [];
@@ -347,7 +348,8 @@ function _submitComposedMessage(text) {
 }
 
 async function _invokeSkillByName(name, requestText, ctx) {
-  const res = await fetch(`${API_BASE}/api/skills/${encodeURIComponent(name)}/invoke`, {
+  const ws = localStorage.getItem('odysseus-workspace') || '';
+  const res = await fetch(`${API_BASE}/api/skills/${encodeURIComponent(name)}/invoke${ws ? `?workspace=${encodeURIComponent(ws)}` : ''}`, {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },

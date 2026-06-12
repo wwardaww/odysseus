@@ -163,7 +163,7 @@ class SkillsManager:
             if "SKILL.md" in files:
                 yield os.path.join(root, "SKILL.md")
 
-    def _iter_all_skill_files(self, owner: Optional[str] = None) -> Iterable[tuple[str, bool]]:
+    def _iter_all_skill_files(self, owner: Optional[str] = None, workspace: Optional[str] = None) -> Iterable[tuple[str, bool]]:
         """Yield (path, read_only) for all skill files."""
         # 1. Yield from default skills_root (read_only = False)
         if os.path.isdir(self.skills_root):
@@ -194,7 +194,8 @@ class SkillsManager:
             if repo_enabled is None:
                 repo_enabled = get_setting("agent_context_repo_skills_enabled", True)
             if repo_enabled:
-                resolved_repo_skills = os.path.abspath(os.path.expanduser(os.path.join(os.getcwd(), ".agents/skills")))
+                wpath = workspace or os.getcwd()
+                resolved_repo_skills = os.path.abspath(os.path.expanduser(os.path.join(wpath, ".agents/skills")))
                 if os.path.isdir(resolved_repo_skills):
                     for root, _dirs, files in os.walk(resolved_repo_skills, followlinks=False):
                         if "SKILL.md" in files:
@@ -253,12 +254,12 @@ class SkillsManager:
     # Public API — keeps the old method names so callers don't break
     # ----------------------------------------------------------------------
 
-    def load_all(self, owner: Optional[str] = None) -> List[Dict]:
+    def load_all(self, owner: Optional[str] = None, workspace: Optional[str] = None) -> List[Dict]:
         """Return every skill as a plain dict, plus any legacy JSON entries."""
         usage = self._load_usage()
         out: List[Dict] = []
         seen_names: set[str] = set()
-        for path, read_only in self._iter_all_skill_files(owner=owner):
+        for path, read_only in self._iter_all_skill_files(owner=owner, workspace=workspace):
             sk = self._read_skill(path)
             if not sk:
                 continue
@@ -326,8 +327,8 @@ class SkillsManager:
                 pass
         return out
 
-    def load(self, owner: Optional[str] = None) -> List[Dict]:
-        entries = self.load_all(owner=owner)
+    def load(self, owner: Optional[str] = None, workspace: Optional[str] = None) -> List[Dict]:
+        entries = self.load_all(owner=owner, workspace=workspace)
         if owner is None:
             return entries
         # SECURITY: strict ownership filter. The previous predicate also
@@ -593,12 +594,12 @@ class SkillsManager:
     # Reading a single skill (used by the skill_view tool)
     # ----------------------------------------------------------------------
 
-    def read_skill_md(self, name: str, owner: Optional[str] = None) -> Optional[str]:
-        for path in self._iter_skill_files():
+    def read_skill_md(self, name: str, owner: Optional[str] = None, workspace: Optional[str] = None) -> Optional[str]:
+        for path, read_only in self._iter_all_skill_files(owner=owner, workspace=workspace):
             sk = self._read_skill(path)
             if not sk or sk.name != name:
                 continue
-            if (sk.owner or "") != (owner or ""):
+            if not read_only and (sk.owner or "") != (owner or ""):
                 continue
             try:
                 with open(path, encoding="utf-8") as f:
@@ -607,14 +608,14 @@ class SkillsManager:
                 return None
         return None
 
-    def read_skill_reference(self, name: str, ref_path: str, owner: Optional[str] = None) -> Optional[str]:
+    def read_skill_reference(self, name: str, ref_path: str, owner: Optional[str] = None, workspace: Optional[str] = None) -> Optional[str]:
         """Read a sub-file under the skill's directory (references/, etc).
         Refuses path traversal."""
-        for path in self._iter_skill_files():
+        for path, read_only in self._iter_all_skill_files(owner=owner, workspace=workspace):
             sk = self._read_skill(path)
             if not sk or sk.name != name:
                 continue
-            if (sk.owner or "") != (owner or ""):
+            if not read_only and (sk.owner or "") != (owner or ""):
                 continue
             base = os.path.realpath(os.path.dirname(path))
             target = os.path.realpath(os.path.join(base, ref_path))
@@ -639,6 +640,7 @@ class SkillsManager:
         *,
         active_toolsets: Optional[List[str]] = None,
         platform: Optional[str] = None,
+        workspace: Optional[str] = None,
     ) -> List[Dict]:
         """Return the `[{name, description, category, status}]` list the
         agent sees in its system prompt.
@@ -652,12 +654,12 @@ class SkillsManager:
             publish click defeats the loop.
 
         Excludes user-created drafts (status=draft, source != teacher-
-        escalation) — those are work-in-progress and pollute the
-        prompt with half-finished procedures.
+            escalation) — those are work-in-progress and pollute the
+            prompt with half-finished procedures.
         """
         active_toolsets = active_toolsets or []
         out = []
-        for s in self.load(owner=owner):
+        for s in self.load(owner=owner, workspace=workspace):
             status = s.get("status")
             # Published + None (pre-status legacy) always included.
             # Drafts only if the teacher wrote them.

@@ -732,6 +732,10 @@ def setup_chat_routes(
         if sess.name and sess.name.startswith("[CMP]"):
             disabled_tools.update({"create_document", "edit_document", "update_document"})
 
+        # Disable document tools when workspace is active, so the agent is forced to use physical file tools (read_file, write_file, edit_file) instead
+        if workspace:
+            disabled_tools.update({"create_document", "edit_document", "update_document", "suggest_document", "manage_documents"})
+
         # Compare mode: disable tools based on compare type
         if compare_mode:
             _compare_strip = {

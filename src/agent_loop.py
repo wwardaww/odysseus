@@ -841,6 +841,7 @@ def _build_system_prompt(
     owner: Optional[str] = None,
     suppress_local_context: bool = False,
     attached_skill_name: Optional[str] = None,
+    workspace: Optional[str] = None,
 ) -> List[Dict]:
     """Build agent system prompt, inject MCP/document context, merge consecutive system msgs."""
     global _cached_base_prompt, _cached_base_prompt_key
@@ -860,7 +861,7 @@ def _build_system_prompt(
     from src.app_helpers import normalize_attached_skill_name
     attached_skill_name = normalize_attached_skill_name(attached_skill_name)
     suppress_skills = bool(attached_skill_name)
-    cache_key = (frozenset(disabled_tools or []), bool(mcp_mgr), needs_admin, _rt_key, compact, _ov_sig, owner, suppress_local_context, suppress_skills, attached_skill_name)
+    cache_key = (frozenset(disabled_tools or []), bool(mcp_mgr), needs_admin, _rt_key, compact, _ov_sig, owner, suppress_local_context, suppress_skills, attached_skill_name, workspace)
     if _cached_base_prompt and _cached_base_prompt_key == cache_key and not active_document:
         agent_prompt = _cached_base_prompt
         # Skill index is user-editable (name + description), so it must never
@@ -872,6 +873,7 @@ def _build_system_prompt(
             suppress_local_context=suppress_local_context,
             suppress_skills=suppress_skills,
             attached_skill_name=attached_skill_name,
+            workspace=workspace,
         )
     else:
         agent_prompt, _skill_index_block = _build_base_prompt(
@@ -885,6 +887,7 @@ def _build_system_prompt(
             suppress_local_context=suppress_local_context,
             suppress_skills=suppress_skills,
             attached_skill_name=attached_skill_name,
+            workspace=workspace,
         )
         if not active_document:
             _cached_base_prompt = agent_prompt
@@ -1166,7 +1169,7 @@ def _build_system_prompt(
                 except (TypeError, ValueError):
                     _skill_max_injected = 3
                 _skill_max_injected = max(0, min(12, _skill_max_injected))
-                skills_candidates = sm.load(owner=owner)
+                skills_candidates = sm.load(owner=owner, workspace=workspace)
                 if attached_skill_name:
                     skills_candidates = [s for s in skills_candidates if s.get("name") == attached_skill_name]
                 relevant_skills = sm.get_relevant_skills(
@@ -1287,10 +1290,13 @@ _ADMIN_TOOLS = {
     "send_to_session", "pipeline", "ask_teacher", "list_models",
 }
 
-def _load_instructions(path: str) -> str:
+def _load_instructions(path: str, workspace: Optional[str] = None) -> str:
     if not path:
         return ""
-    expanded = os.path.abspath(os.path.expanduser(path.strip()))
+    if workspace and not os.path.isabs(os.path.expanduser(path.strip())):
+        expanded = os.path.abspath(os.path.join(workspace, os.path.expanduser(path.strip())))
+    else:
+        expanded = os.path.abspath(os.path.expanduser(path.strip()))
     if not os.path.exists(expanded):
         return ""
     
@@ -1323,8 +1329,8 @@ def _load_instructions(path: str) -> str:
         return "\n\n".join(contents).strip()
     return ""
 
-def _load_repo_instructions() -> str:
-    wpath = os.getcwd()
+def _load_repo_instructions(workspace: Optional[str] = None) -> str:
+    wpath = workspace or os.getcwd()
     contents = []
     for filename in ["AGENTS.md", "CLAUDE.md"]:
         filepath = os.path.join(wpath, filename)
@@ -1338,7 +1344,7 @@ def _load_repo_instructions() -> str:
                 logger.warning(f"Failed to read repo instructions {filepath}: {e}")
     return "\n\n".join(contents).strip()
 
-def _build_layered_instructions(owner: Optional[str] = None) -> str:
+def _build_layered_instructions(owner: Optional[str] = None, workspace: Optional[str] = None) -> str:
     from src.settings import get_user_setting, get_setting
     
     priority = get_user_setting("agent_context_priority", owner=owner) or get_setting("agent_context_priority") or [
@@ -1354,7 +1360,7 @@ def _build_layered_instructions(owner: Optional[str] = None) -> str:
                 enabled = get_setting("agent_context_global_instructions_enabled", True)
             if enabled:
                 path = get_user_setting("agent_context_global_instructions_path", owner=owner) or get_setting("agent_context_global_instructions_path") or "~/.agents/instructions.md"
-                content = _load_instructions(path)
+                content = _load_instructions(path, workspace=workspace)
                 if content:
                     instructions_blocks.append(f"## Global Instructions\n{content}")
                     
@@ -1363,7 +1369,7 @@ def _build_layered_instructions(owner: Optional[str] = None) -> str:
             if enabled is None:
                 enabled = get_setting("agent_context_repo_instructions_enabled", True)
             if enabled:
-                content = _load_repo_instructions()
+                content = _load_repo_instructions(workspace=workspace)
                 if content:
                     instructions_blocks.append(f"## Repository Instructions\n{content}")
                     
@@ -1377,7 +1383,7 @@ def _build_layered_instructions(owner: Optional[str] = None) -> str:
                     paths = [p.strip() for p in paths_str.replace(";", ",").split(",") if p.strip()]
                     custom_contents = []
                     for path in paths:
-                        content = _load_instructions(path)
+                        content = _load_instructions(path, workspace=workspace)
                         if content:
                             custom_contents.append(f"### Custom Path: {path}\n{content}")
                     if custom_contents:
@@ -1398,6 +1404,7 @@ def _build_base_prompt(
     suppress_local_context: bool = False,
     suppress_skills: bool = False,
     attached_skill_name: Optional[str] = None,
+    workspace: Optional[str] = None,
 ):
     """Build the agent prompt with only relevant tools included.
 
@@ -1450,7 +1457,7 @@ def _build_base_prompt(
             from src.constants import DATA_DIR
             _sm = SkillsManager(DATA_DIR)
             active_tools = list(set(TOOL_SECTIONS.keys()) - set(disabled or []))
-            skill_idx = _sm.index_for(owner=owner, active_toolsets=active_tools)
+            skill_idx = _sm.index_for(owner=owner, active_toolsets=active_tools, workspace=workspace)
             if attached_skill_name:
                 skill_idx = [s for s in skill_idx if s.get("name") == attached_skill_name]
             if skill_idx:
@@ -1476,7 +1483,7 @@ def _build_base_prompt(
 
     # Inject layered instructions
     if not suppress_local_context:
-        layered_inst = _build_layered_instructions(owner)
+        layered_inst = _build_layered_instructions(owner, workspace=workspace)
         if layered_inst:
             agent_prompt += "\n\n" + layered_inst
 
@@ -2095,6 +2102,7 @@ async def stream_agent_loop(
         owner=owner,
         suppress_local_context=guide_only,
         attached_skill_name=attached_skill_name,
+        workspace=workspace,
     )
     if workspace and not guide_only:
         # PREPEND (not append) so it dominates the large base prompt — appended
@@ -2104,13 +2112,14 @@ async def stream_agent_loop(
             f"## ACTIVE WORKSPACE — READ FIRST\n"
             f"The user is working in this folder: {workspace}\n"
             f"It IS the project. bash/python run with cwd set here and "
-            f"read_file/write_file are confined to it (paths outside are rejected).\n"
+            f"read_file/write_file/edit_file/ls/glob/grep are confined to it (paths outside are rejected).\n"
             f"When the user says \"the code\" / \"this project\" / \"the workspace\" "
-            f"or asks to review/find/edit something WITHOUT a path, they mean THIS "
+            f"or asks to review/find/edit/create/write something WITHOUT a path, they mean THIS "
             f"folder. Do NOT ask the user for code or a path, and do NOT read a file "
             f"literally named \"workspace\". ALWAYS start by exploring it yourself: "
             f"run `bash` → `git ls-files` (or `ls -R`) to see the files, then "
-            f"read_file the relevant ones by path RELATIVE to the workspace."
+            f"read_file the relevant ones by path RELATIVE to the workspace.\n"
+            f"CRITICAL: Do NOT use create_document / edit_document / update_document when creating or editing code, scripts, or project files. You MUST use write_file or edit_file to save files physically on disk under the workspace path. The document/editor-panel tools are disabled and not meant for project files."
         )
         if messages and messages[0].get("role") == "system":
             messages[0]["content"] = _ws_note + "\n\n" + (messages[0].get("content") or "")
